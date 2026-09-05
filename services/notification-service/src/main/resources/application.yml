@@ -1,0 +1,66 @@
+spring:
+  application:
+    name: notification-service
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:notification_service}
+    username: ${DB_USER:meridian}
+    password: ${DB_PASSWORD:meridian_local_dev}
+    hikari:
+      connection-timeout: 5000
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+    consumer:
+      group-id: notification-service
+      auto-offset-reset: earliest
+      enable-auto-commit: false
+
+server:
+  port: ${SERVER_PORT:8088}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: never
+  health:
+    kafka:
+      # A Kafka outage should not flip this service's own health/readiness unhealthy — the
+      # consumer simply resumes from its committed offset once the broker returns.
+      enabled: false
+
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+logging:
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %-5level [%X{correlationId:-'-'}] %logger{36} - %msg%n"
+
+meridian:
+  security:
+    jwt:
+      # Must match auth-service's signing secret exactly — this service only verifies tokens,
+      # it never issues them. LOCAL/DEMO DEFAULT ONLY.
+      secret: ${MERIDIAN_JWT_SECRET:meridian-bank-local-demo-jwt-signing-secret-change-me-32bytes-min}
+  notification-consumer:
+    max-attempts: ${MERIDIAN_NOTIFICATION_CONSUMER_MAX_ATTEMPTS:5}
+    base-backoff-ms: ${MERIDIAN_NOTIFICATION_CONSUMER_BASE_BACKOFF_MS:1000}
+    max-backoff-ms: ${MERIDIAN_NOTIFICATION_CONSUMER_MAX_BACKOFF_MS:30000}

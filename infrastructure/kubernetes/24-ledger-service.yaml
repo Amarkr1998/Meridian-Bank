@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: ledger-service
+  namespace: meridian-bank
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: ledger-service }
+  template:
+    metadata:
+      labels: { app: ledger-service }
+    spec:
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:16-alpine
+          command: ["sh", "-c", "until pg_isready -h postgres -p 5432 -U meridian; do echo waiting for postgres; sleep 3; done"]
+      containers:
+        - name: ledger-service
+          image: meridianbank-ledger-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8085
+          envFrom:
+            - configMapRef: { name: meridian-config }
+          env:
+            - name: DB_NAME
+              value: "ledger_service"
+            - name: SERVER_PORT
+              value: "8085"
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: meridian-secrets, key: POSTGRES_PASSWORD } }
+            - name: MERIDIAN_JWT_SECRET
+              valueFrom: { secretKeyRef: { name: meridian-secrets, key: MERIDIAN_JWT_SECRET } }
+          # startupProbe: see 20-auth-service.yaml for why this exists (CPU-starved cold boot on
+          # this 4-CPU node — real thundering-herd crash loop found during Phase 18 live testing).
+          startupProbe:
+            httpGet: { path: /actuator/health, port: 8085 }
+            periodSeconds: 10
+            failureThreshold: 90
+          readinessProbe:
+            httpGet: { path: /actuator/health, port: 8085 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /actuator/health, port: 8085 }
+            initialDelaySeconds: 5
+            periodSeconds: 15
+            failureThreshold: 12
+          resources:
+            requests: { cpu: "100m", memory: "384Mi" }
+            limits: { cpu: "750m", memory: "768Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: ledger-service
+  namespace: meridian-bank
+spec:
+  selector: { app: ledger-service }
+  ports:
+    - port: 8085
+      targetPort: 8085

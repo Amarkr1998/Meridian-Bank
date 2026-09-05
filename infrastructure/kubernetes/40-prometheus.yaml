@@ -1,0 +1,128 @@
+# Identical scrape config to infrastructure/prometheus/prometheus.yml — K8s Service DNS names
+# were deliberately chosen to match docker-compose's service names exactly, so this file needed
+# zero changes to work here too.
+#
+# Simplification, stated plainly: targets are the Services (ClusterIP), not individual pods, so
+# with api-gateway/payment-service running 2 replicas each, each scrape lands on whichever pod the
+# Service's load-balancing sends it to that round — not a genuinely distinct per-pod time series.
+# A real K8s Prometheus setup would use `kubernetes_sd_configs` (or the Prometheus Operator's
+# ServiceMonitor CRD) to discover and scrape every pod individually, which needs a ClusterRole/
+# ClusterRoleBinding granting the Prometheus service account permission to list pods/endpoints —
+# real additional infrastructure this minimal manifest set deliberately doesn't take on, the same
+# "keep it minimal" reasoning as api-gateway's own README ("Why not Spring Cloud Gateway").
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: prometheus-config
+  namespace: meridian-bank
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+    scrape_configs:
+      - job_name: prometheus
+        static_configs:
+          - targets: ["localhost:9090"]
+      - job_name: api-gateway
+        metrics_path: /actuator/prometheus
+        static_configs:
+          - targets: ["api-gateway:8080"]
+      - job_name: auth-service
+        metrics_path: /actuator/prometheus
+        static_configs:
+          - targets: ["auth-service:8081"]
+      - job_name: customer-kyc-service
+        metrics_path: /actuator/prometheus
+        static_configs:
+          - targets: ["customer-kyc-service:8082"]
+      - job_name: account-service
+        metrics_path: /actuator/prometheus
+        static_configs:
+          - targets: ["account-service:8083"]
+      - job_name: payment-service
+        metrics_path: /actuator/prometheus
+        static_configs:
+          - targets: ["payment-service:8084"]
+      - job_name: ledger-service
+        metrics_path: /actuator/prometheus
+        static_configs:
+          - targets: ["ledger-service:8085"]
+      - job_name: fraud-risk-service
+        metrics_path: /actuator/prometheus
+        static_configs:
+          - targets: ["fraud-risk-service:8086"]
+      - job_name: audit-service
+        metrics_path: /actuator/prometheus
+        static_configs:
+          - targets: ["audit-service:8087"]
+      - job_name: notification-service
+        metrics_path: /actuator/prometheus
+        static_configs:
+          - targets: ["notification-service:8088"]
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: prometheus-data
+  namespace: meridian-bank
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 2Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: prometheus
+  namespace: meridian-bank
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: { app: prometheus }
+  template:
+    metadata:
+      labels: { app: prometheus }
+    spec:
+      containers:
+        - name: prometheus
+          image: prom/prometheus:v2.55.1
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.retention.time=15d
+          ports:
+            - containerPort: 9090
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+              readOnly: true
+            - name: data
+              mountPath: /prometheus
+          readinessProbe:
+            httpGet: { path: /-/healthy, port: 9090 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests: { cpu: "100m", memory: "256Mi" }
+            limits: { cpu: "500m", memory: "512Mi" }
+      volumes:
+        - name: config
+          configMap:
+            name: prometheus-config
+        - name: data
+          persistentVolumeClaim:
+            claimName: prometheus-data
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: prometheus
+  namespace: meridian-bank
+spec:
+  selector: { app: prometheus }
+  ports:
+    - port: 9090
+      targetPort: 9090

@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: customer-kyc-service
+  namespace: meridian-bank
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: customer-kyc-service }
+  template:
+    metadata:
+      labels: { app: customer-kyc-service }
+    spec:
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:16-alpine
+          command: ["sh", "-c", "until pg_isready -h postgres -p 5432 -U meridian; do echo waiting for postgres; sleep 3; done"]
+      containers:
+        - name: customer-kyc-service
+          image: meridianbank-customer-kyc-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8082
+          envFrom:
+            - configMapRef: { name: meridian-config }
+          env:
+            - name: DB_NAME
+              value: "customer_kyc_service"
+            - name: SERVER_PORT
+              value: "8082"
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: meridian-secrets, key: POSTGRES_PASSWORD } }
+            - name: MERIDIAN_JWT_SECRET
+              valueFrom: { secretKeyRef: { name: meridian-secrets, key: MERIDIAN_JWT_SECRET } }
+            - name: AUTH_SERVICE_BASE_URL
+              value: "http://auth-service:8081"
+          # startupProbe: see 20-auth-service.yaml for why this exists (CPU-starved cold boot on
+          # this 4-CPU node — real thundering-herd crash loop found during Phase 18 live testing).
+          startupProbe:
+            httpGet: { path: /actuator/health, port: 8082 }
+            periodSeconds: 10
+            failureThreshold: 90
+          readinessProbe:
+            httpGet: { path: /actuator/health, port: 8082 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /actuator/health, port: 8082 }
+            initialDelaySeconds: 5
+            periodSeconds: 15
+            failureThreshold: 12
+          resources:
+            requests: { cpu: "100m", memory: "384Mi" }
+            limits: { cpu: "750m", memory: "768Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: customer-kyc-service
+  namespace: meridian-bank
+spec:
+  selector: { app: customer-kyc-service }
+  ports:
+    - port: 8082
+      targetPort: 8082

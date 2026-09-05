@@ -1,0 +1,60 @@
+# Meridian Bank — Prometheus scrape configuration (Phase 16).
+#
+# Every service already exposes /actuator/prometheus via Micrometer's Prometheus registry (see
+# each service's pom.xml/application.yml) — this file just tells Prometheus where to find them.
+# Target addresses use docker-compose service names/internal ports, since Prometheus itself runs
+# as a container on the same `meridian-net` network — see docker-compose.yml.
+
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+
+scrape_configs:
+  - job_name: prometheus
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  - job_name: api-gateway
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["api-gateway:8080"]
+
+  - job_name: auth-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["auth-service:8081"]
+
+  - job_name: customer-kyc-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["customer-kyc-service:8082"]
+
+  - job_name: account-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["account-service:8083"]
+
+  - job_name: payment-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["payment-service:8084"]
+
+  - job_name: ledger-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["ledger-service:8085"]
+
+  - job_name: fraud-risk-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["fraud-risk-service:8086"]
+
+  - job_name: audit-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["audit-service:8087"]
+
+  - job_name: notification-service
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ["notification-service:8088"]

@@ -1,0 +1,122 @@
+# PostgreSQL: one instance, one database per service — see infrastructure/postgres/README.md and
+# docs/adr/0003-postgresql-system-of-record.md. The init script is identical to the one
+# docker-compose mounts at /docker-entrypoint-initdb.d — same image, same behavior, only the
+# mounting mechanism (ConfigMap vs. a bind-mounted file) differs.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: postgres-init-scripts
+  namespace: meridian-bank
+data:
+  init-databases.sh: |
+    #!/bin/bash
+    set -euo pipefail
+    DATABASES=(
+      auth_service
+      customer_kyc_service
+      account_service
+      payment_service
+      ledger_service
+      fraud_risk_service
+      notification_service
+      audit_service
+    )
+    for db in "${DATABASES[@]}"; do
+      echo "Creating database '${db}' (owner: ${POSTGRES_USER}) if it does not exist..."
+      psql -v ON_ERROR_STOP=1 --username "${POSTGRES_USER}" --dbname "postgres" <<-EOSQL
+        SELECT 'CREATE DATABASE ${db} OWNER ${POSTGRES_USER}'
+        WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '${db}')\gexec
+    EOSQL
+    done
+    echo "Meridian Bank: all per-service databases are ready."
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: meridian-bank
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels:
+      app: postgres
+  template:
+    metadata:
+      labels:
+        app: postgres
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          ports:
+            - containerPort: 5432
+          env:
+            - name: POSTGRES_USER
+              valueFrom:
+                configMapKeyRef: { name: meridian-config, key: DB_USER }
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef: { name: meridian-secrets, key: POSTGRES_PASSWORD }
+            - name: POSTGRES_DB
+              value: "postgres"
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+            - name: init-scripts
+              mountPath: /docker-entrypoint-initdb.d
+              readOnly: true
+          # startupProbe + explicit timeoutSeconds on the exec probes below: `pg_isready` spawns a
+          # subprocess, and K8s exec probes default to timeoutSeconds: 1 — under the real CPU
+          # contention this 4-CPU demo node sees with 10+ JVMs booting at once, that spawn
+          # routinely takes longer than 1s, so kubelet concludes Postgres is dead and kills the
+          # actual database mid-operation purely from a probe-timeout artifact (the exact same
+          # class of bug originally found and fixed on Kafka's exec probe — see
+          # infrastructure/kubernetes/README.md, "Where this deliberately differs..."). Restarting
+          # Postgres itself then cascades into every backend service's DB connections dying at
+          # once, which is what made this one so disruptive to diagnose.
+          startupProbe:
+            exec:
+              command: ["pg_isready", "-U", "meridian", "-d", "postgres"]
+            periodSeconds: 5
+            timeoutSeconds: 5
+            failureThreshold: 30
+          readinessProbe:
+            exec:
+              command: ["pg_isready", "-U", "meridian", "-d", "postgres"]
+            periodSeconds: 5
+            timeoutSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["pg_isready", "-U", "meridian", "-d", "postgres"]
+            periodSeconds: 10
+            timeoutSeconds: 5
+          resources:
+            requests: { cpu: "150m", memory: "256Mi" }
+            limits: { cpu: "1", memory: "512Mi" }
+      volumes:
+        - name: init-scripts
+          configMap:
+            name: postgres-init-scripts
+            defaultMode: 0755
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: ["ReadWriteOnce"]
+        resources:
+          requests:
+            storage: 2Gi
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: meridian-bank
+spec:
+  selector:
+    app: postgres
+  ports:
+    - port: 5432
+      targetPort: 5432
+  clusterIP: None

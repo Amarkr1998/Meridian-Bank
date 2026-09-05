@@ -1,0 +1,71 @@
+spring:
+  application:
+    name: ledger-service
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:ledger_service}
+    username: ${DB_USER:meridian}
+    password: ${DB_PASSWORD:meridian_local_dev}
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:9092}
+
+server:
+  port: ${SERVER_PORT:8085}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: never
+  health:
+    kafka:
+      # The outbox publisher already degrades independently on a Kafka outage (rows simply queue
+      # as PENDING and retry — see OutboxPublisher); this service's own health/readiness must not
+      # flip unhealthy just because Kafka is temporarily down.
+      enabled: false
+
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+logging:
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %-5level [%X{correlationId:-'-'}] %logger{36} - %msg%n"
+
+meridian:
+  security:
+    jwt:
+      # Must match auth-service's signing secret exactly — this service only verifies tokens,
+      # it never issues them. LOCAL/DEMO DEFAULT ONLY.
+      secret: ${MERIDIAN_JWT_SECRET:meridian-bank-local-demo-jwt-signing-secret-change-me-32bytes-min}
+  ledger:
+    default-currency: ${MERIDIAN_LEDGER_DEFAULT_CURRENCY:USD}
+  outbox:
+    poll-interval-ms: ${MERIDIAN_OUTBOX_POLL_INTERVAL_MS:2000}
+    batch-size: ${MERIDIAN_OUTBOX_BATCH_SIZE:20}
+    max-attempts: ${MERIDIAN_OUTBOX_MAX_ATTEMPTS:5}
+    base-backoff-seconds: ${MERIDIAN_OUTBOX_BASE_BACKOFF_SECONDS:5}
+    max-backoff-seconds: ${MERIDIAN_OUTBOX_MAX_BACKOFF_SECONDS:300}
+  reconciliation:
+    # How often the batch comparison job runs, and how long a newly-observed transaction is given
+    # before its synthetic external counterpart is expected to have "arrived" — see
+    # docs/reconciliation/reconciliation-design.md and ReconciliationService's Javadoc.
+    poll-interval-ms: ${MERIDIAN_RECONCILIATION_POLL_INTERVAL_MS:60000}
+    external-feed-delay-seconds: ${MERIDIAN_RECONCILIATION_EXTERNAL_FEED_DELAY_SECONDS:120}

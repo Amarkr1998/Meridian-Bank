@@ -1,0 +1,71 @@
+# ==============================
+# Meridian Bank — .gitignore
+# ==============================
+
+# --- Secrets & environment ---
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.jks
+secrets/
+**/application-local.yml
+**/application-secrets.yml
+
+# --- Java / Maven ---
+target/
+*.class
+*.jar
+!.mvn/wrapper/maven-wrapper.jar
+*.log
+hs_err_pid*
+
+# --- Gradle (if ever used) ---
+.gradle/
+build/
+
+# --- Node / React / Vite ---
+node_modules/
+dist/
+dist-ssr/
+*.local
+.vite/
+coverage/
+
+# --- IDE ---
+.idea/
+*.iml
+*.iws
+.vscode/
+!.vscode/extensions.json
+.classpath
+.project
+.settings/
+
+# --- OS ---
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# --- Docker / Kubernetes local state ---
+infrastructure/docker/volumes/
+*.kubeconfig
+
+# --- Testcontainers / test output ---
+/test-results/
+/reports/
+
+# --- Terraform (future IaC, if added) ---
+*.tfstate
+*.tfstate.backup
+.terraform/
+
+# --- Logs & temp ---
+logs/
+*.tmp
+*.bak
+
+# --- Local AI-assistant session state (machine/session-specific, not project config) ---
+.claude/

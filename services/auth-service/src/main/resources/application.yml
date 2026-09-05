@@ -1,0 +1,75 @@
+spring:
+  application:
+    name: auth-service
+
+  datasource:
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:auth_service}
+    username: ${DB_USER:meridian}
+    password: ${DB_PASSWORD:meridian_local_dev}
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: UTC
+
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+
+  data:
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+
+server:
+  port: ${SERVER_PORT:8081}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,prometheus
+  endpoint:
+    health:
+      show-details: never
+
+  metrics:
+    tags:
+      application: ${spring.application.name}
+
+logging:
+  pattern:
+    console: "%d{HH:mm:ss.SSS} %-5level [%X{correlationId:-'-'}] %logger{36} - %msg%n"
+
+meridian:
+  security:
+    jwt:
+      # LOCAL/DEMO DEFAULT ONLY. Never reuse this secret outside local development —
+      # override MERIDIAN_JWT_SECRET in any shared environment. Must be >= 32 bytes for HS256.
+      secret: ${MERIDIAN_JWT_SECRET:meridian-bank-local-demo-jwt-signing-secret-change-me-32bytes-min}
+      access-token-ttl-seconds: ${MERIDIAN_JWT_ACCESS_TTL_SECONDS:900}      # 15 minutes
+      refresh-token-ttl-seconds: ${MERIDIAN_JWT_REFRESH_TTL_SECONDS:604800} # 7 days
+      issuer: meridian-bank-auth-service
+    mfa:
+      otp-ttl-seconds: ${MERIDIAN_MFA_OTP_TTL_SECONDS:300}   # 5 minutes
+      max-attempts: ${MERIDIAN_MFA_MAX_ATTEMPTS:5}
+      # Demo-only: returns the generated OTP directly in the login response so the flow is
+      # testable without notification-service (introduced in Phase 13). Never enabled outside
+      # local/demo profiles — see docs/architecture/security notes in auth-service/README.md.
+      demo-expose-otp: ${MERIDIAN_MFA_DEMO_EXPOSE_OTP:true}
+    lockout:
+      max-failed-attempts: ${MERIDIAN_LOCKOUT_MAX_ATTEMPTS:5}
+      lockout-duration-seconds: ${MERIDIAN_LOCKOUT_DURATION_SECONDS:900} # 15 minutes
+    password-reset:
+      token-ttl-seconds: ${MERIDIAN_PASSWORD_RESET_TTL_SECONDS:1800} # 30 minutes
+      # Demo-only, same rationale as demo-expose-otp above: returns the reset token in the API
+      # response (standing in for the email channel) instead of only logging that one was issued.
+      demo-expose-token: ${MERIDIAN_PASSWORD_RESET_DEMO_EXPOSE_TOKEN:true}
+  admin-bootstrap:
+    enabled: ${MERIDIAN_ADMIN_BOOTSTRAP_ENABLED:true}
+    email: ${MERIDIAN_ADMIN_EMAIL:admin@meridianbank.local}
+    password: ${MERIDIAN_ADMIN_PASSWORD:ChangeMe!Local1}

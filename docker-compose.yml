@@ -1,0 +1,496 @@
+# Meridian Bank — local infrastructure + services
+#
+# Phase 1: PostgreSQL, Kafka (single-node KRaft), Redis, and a one-shot topic-bootstrap job.
+# Phase 2 adds auth-service. Phase 3 adds customer-kyc-service. Phase 4-5 add account-service.
+# Phase 6 adds payment-service. Phase 7 adds ledger-service (real double-entry balances). Phase 8
+# wires customer-kyc-service/account-service/payment-service's transactional outbox publishers to
+# the Kafka broker (real events on the docs/kafka topic catalog; no consumers exist yet). Phase 9
+# adds fraud-risk-service (real fraud scoring + AML alerting, called synchronously by
+# payment-service's RISK_CHECK step). Phase 10 adds maker-checker approval gates inside the
+# existing account-service/customer-kyc-service/fraud-risk-service/payment-service (no new
+# containers). Phase 11 adds audit-service — this project's first genuine Kafka *consumer* — which
+# consumes the audit.event topic every other service now also publishes to. Phase 12 adds
+# reconciliation inside the existing ledger-service (no new container) — its first use of Kafka.
+# Phase 13 adds notification-service — this project's second Kafka consumer — and a customer
+# support feature inside the existing customer-kyc-service (no new container for that half).
+# Remaining services, the frontend, and Prometheus/Grafana are added in their own later phases
+# (see CLAUDE.md) — do not add them here ahead of that.
+#
+# Usage:
+#   cp .env.example .env      # first time only; adjust values if needed
+#   docker compose up -d --build
+#   docker compose ps         # wait for all services to report healthy
+#   docker compose logs -f kafka-init   # confirm topic bootstrap succeeded
+#   docker compose down       # stop (add -v to also wipe local volumes/data)
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: meridian-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-meridian}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-meridian_local_dev}
+      POSTGRES_DB: postgres
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./infrastructure/postgres/init-databases.sh:/docker-entrypoint-initdb.d/init-databases.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-meridian} -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - meridian-net
+
+  redis:
+    image: redis:7-alpine
+    container_name: meridian-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+    networks:
+      - meridian-net
+
+  kafka:
+    image: apache/kafka:3.8.0
+    hostname: kafka
+    container_name: meridian-kafka
+    restart: unless-stopped
+    ports:
+      - "${KAFKA_PORT:-9092}:9092"
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      KAFKA_LISTENERS: PLAINTEXT://kafka:19092,CONTROLLER://kafka:9093,PLAINTEXT_HOST://0.0.0.0:9092
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:19092,PLAINTEXT_HOST://localhost:${KAFKA_PORT:-9092}
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@kafka:9093
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_AUTO_CREATE_TOPICS_ENABLE: "false"
+      KAFKA_LOG_DIRS: /var/lib/kafka/data
+      CLUSTER_ID: MeridianBankLocalKRaftCluster
+    volumes:
+      - kafka_data:/var/lib/kafka/data
+    healthcheck:
+      # timeout widened from 10s: this check launches a whole new JVM per invocation, which
+      # routinely takes longer than 10s under real host load (e.g. running this stack alongside
+      # a parallel local Kubernetes deployment of the same services) — a purely-cosmetic timeout
+      # was flipping Kafka to "unhealthy" and blocking dependent services even though the broker
+      # itself was fine. Found live during Phase 18 testing (the same root cause already fixed on
+      # the Kubernetes readiness probe — see infrastructure/kubernetes/README.md).
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-broker-api-versions.sh --bootstrap-server kafka:19092"]
+      interval: 15s
+      timeout: 25s
+      retries: 15
+      start_period: 30s
+    networks:
+      - meridian-net
+
+  kafka-init:
+    image: apache/kafka:3.8.0
+    container_name: meridian-kafka-init
+    restart: "no"
+    depends_on:
+      kafka:
+        condition: service_healthy
+    volumes:
+      - ./infrastructure/kafka/create-topics.sh:/create-topics.sh:ro
+    entrypoint: ["/bin/bash", "/create-topics.sh"]
+    networks:
+      - meridian-net
+
+  auth-service:
+    build:
+      context: ./services/auth-service
+    container_name: meridian-auth-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: auth_service
+      DB_USER: ${POSTGRES_USER:-meridian}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-meridian_local_dev}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      SERVER_PORT: 8081
+      MERIDIAN_JWT_SECRET: ${MERIDIAN_JWT_SECRET:-meridian-bank-local-demo-jwt-signing-secret-change-me-32bytes-min}
+      MERIDIAN_ADMIN_EMAIL: ${MERIDIAN_ADMIN_EMAIL:-admin@meridianbank.local}
+      MERIDIAN_ADMIN_PASSWORD: ${MERIDIAN_ADMIN_PASSWORD:-ChangeMe!Local1}
+    ports:
+      - "${AUTH_SERVICE_PORT:-8081}:8081"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8081/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - meridian-net
+
+  customer-kyc-service:
+    build:
+      context: ./services/customer-kyc-service
+    container_name: meridian-customer-kyc-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: customer_kyc_service
+      DB_USER: ${POSTGRES_USER:-meridian}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-meridian_local_dev}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      SERVER_PORT: 8082
+      MERIDIAN_JWT_SECRET: ${MERIDIAN_JWT_SECRET:-meridian-bank-local-demo-jwt-signing-secret-change-me-32bytes-min}
+      AUTH_SERVICE_BASE_URL: http://auth-service:8081
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+    ports:
+      - "${CUSTOMER_KYC_SERVICE_PORT:-8082}:8082"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8082/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - meridian-net
+
+  account-service:
+    build:
+      context: ./services/account-service
+    container_name: meridian-account-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      customer-kyc-service:
+        condition: service_healthy
+      ledger-service:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: account_service
+      DB_USER: ${POSTGRES_USER:-meridian}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-meridian_local_dev}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      SERVER_PORT: 8083
+      MERIDIAN_JWT_SECRET: ${MERIDIAN_JWT_SECRET:-meridian-bank-local-demo-jwt-signing-secret-change-me-32bytes-min}
+      CUSTOMER_KYC_SERVICE_BASE_URL: http://customer-kyc-service:8082
+      LEDGER_SERVICE_BASE_URL: http://ledger-service:8085
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+    ports:
+      - "${ACCOUNT_SERVICE_PORT:-8083}:8083"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8083/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - meridian-net
+
+  payment-service:
+    build:
+      context: ./services/payment-service
+    container_name: meridian-payment-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      account-service:
+        condition: service_healthy
+      ledger-service:
+        condition: service_healthy
+      fraud-risk-service:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: payment_service
+      DB_USER: ${POSTGRES_USER:-meridian}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-meridian_local_dev}
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      SERVER_PORT: 8084
+      MERIDIAN_JWT_SECRET: ${MERIDIAN_JWT_SECRET:-meridian-bank-local-demo-jwt-signing-secret-change-me-32bytes-min}
+      ACCOUNT_SERVICE_BASE_URL: http://account-service:8083
+      CUSTOMER_KYC_SERVICE_BASE_URL: http://customer-kyc-service:8082
+      LEDGER_SERVICE_BASE_URL: http://ledger-service:8085
+      FRAUD_RISK_SERVICE_BASE_URL: http://fraud-risk-service:8086
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+    ports:
+      - "${PAYMENT_SERVICE_PORT:-8084}:8084"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8084/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - meridian-net
+
+  ledger-service:
+    build:
+      context: ./services/ledger-service
+    container_name: meridian-ledger-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ledger_service
+      DB_USER: ${POSTGRES_USER:-meridian}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-meridian_local_dev}
+      SERVER_PORT: 8085
+      MERIDIAN_JWT_SECRET: ${MERIDIAN_JWT_SECRET:-meridian-bank-local-demo-jwt-signing-secret-change-me-32bytes-min}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+    ports:
+      - "${LEDGER_SERVICE_PORT:-8085}:8085"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8085/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - meridian-net
+
+  fraud-risk-service:
+    build:
+      context: ./services/fraud-risk-service
+    container_name: meridian-fraud-risk-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: fraud_risk_service
+      DB_USER: ${POSTGRES_USER:-meridian}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-meridian_local_dev}
+      SERVER_PORT: 8086
+      MERIDIAN_JWT_SECRET: ${MERIDIAN_JWT_SECRET:-meridian-bank-local-demo-jwt-signing-secret-change-me-32bytes-min}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+    ports:
+      - "${FRAUD_RISK_SERVICE_PORT:-8086}:8086"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8086/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - meridian-net
+
+  audit-service:
+    build:
+      context: ./services/audit-service
+    container_name: meridian-audit-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: audit_service
+      DB_USER: ${POSTGRES_USER:-meridian}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-meridian_local_dev}
+      SERVER_PORT: 8087
+      MERIDIAN_JWT_SECRET: ${MERIDIAN_JWT_SECRET:-meridian-bank-local-demo-jwt-signing-secret-change-me-32bytes-min}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+    ports:
+      - "${AUDIT_SERVICE_PORT:-8087}:8087"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8087/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - meridian-net
+
+  notification-service:
+    build:
+      context: ./services/notification-service
+    container_name: meridian-notification-service
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      kafka-init:
+        condition: service_completed_successfully
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: notification_service
+      DB_USER: ${POSTGRES_USER:-meridian}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-meridian_local_dev}
+      SERVER_PORT: 8088
+      MERIDIAN_JWT_SECRET: ${MERIDIAN_JWT_SECRET:-meridian-bank-local-demo-jwt-signing-secret-change-me-32bytes-min}
+      KAFKA_BOOTSTRAP_SERVERS: kafka:19092
+    ports:
+      - "${NOTIFICATION_SERVICE_PORT:-8088}:8088"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8088/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - meridian-net
+
+  api-gateway:
+    build:
+      context: ./services/api-gateway
+    container_name: meridian-api-gateway
+    restart: unless-stopped
+    depends_on:
+      redis:
+        condition: service_healthy
+      auth-service:
+        condition: service_healthy
+      customer-kyc-service:
+        condition: service_healthy
+      account-service:
+        condition: service_healthy
+      payment-service:
+        condition: service_healthy
+      notification-service:
+        condition: service_healthy
+      fraud-risk-service:
+        condition: service_healthy
+      ledger-service:
+        condition: service_healthy
+      audit-service:
+        condition: service_healthy
+    environment:
+      SERVER_PORT: 8080
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      MERIDIAN_JWT_SECRET: ${MERIDIAN_JWT_SECRET:-meridian-bank-local-demo-jwt-signing-secret-change-me-32bytes-min}
+      MERIDIAN_GATEWAY_CORS_ALLOWED_ORIGINS: ${MERIDIAN_GATEWAY_CORS_ALLOWED_ORIGINS:-http://localhost:5173}
+      AUTH_SERVICE_URL: http://auth-service:8081
+      CUSTOMER_KYC_SERVICE_URL: http://customer-kyc-service:8082
+      ACCOUNT_SERVICE_URL: http://account-service:8083
+      PAYMENT_SERVICE_URL: http://payment-service:8084
+      NOTIFICATION_SERVICE_URL: http://notification-service:8088
+      FRAUD_RISK_SERVICE_URL: http://fraud-risk-service:8086
+      LEDGER_SERVICE_URL: http://ledger-service:8085
+      AUDIT_SERVICE_URL: http://audit-service:8087
+    ports:
+      - "${API_GATEWAY_PORT:-8080}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:8080/actuator/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - meridian-net
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
+    container_name: meridian-prometheus
+    restart: unless-stopped
+    volumes:
+      - ./infrastructure/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus_data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=15d
+    ports:
+      - "${PROMETHEUS_PORT:-9090}:9090"
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:9090/-/healthy"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - meridian-net
+
+  grafana:
+    image: grafana/grafana:11.3.1
+    container_name: meridian-grafana
+    restart: unless-stopped
+    depends_on:
+      prometheus:
+        condition: service_healthy
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-ChangeMe!Local1}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+    volumes:
+      - ./infrastructure/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./infrastructure/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "${GRAFANA_PORT:-3000}:3000"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks:
+      - meridian-net
+
+volumes:
+  postgres_data:
+  redis_data:
+  kafka_data:
+  prometheus_data:
+  grafana_data:
+
+networks:
+  meridian-net:
+    driver: bridge

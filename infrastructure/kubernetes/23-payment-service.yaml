@@ -1,0 +1,74 @@
+# replicas: 2 — one of the two stateless services this deployment demonstrates horizontal scaling
+# on (see docs/architecture/deployment-architecture.md), matched by an HPA in 30-autoscaling.yaml.
+# Safe to run >1 replica: idempotency is enforced in shared Redis/Postgres, not in-memory per pod.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: payment-service
+  namespace: meridian-bank
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: payment-service }
+  template:
+    metadata:
+      labels: { app: payment-service }
+    spec:
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:16-alpine
+          command: ["sh", "-c", "until pg_isready -h postgres -p 5432 -U meridian; do echo waiting for postgres; sleep 3; done"]
+      containers:
+        - name: payment-service
+          image: meridianbank-payment-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8084
+          envFrom:
+            - configMapRef: { name: meridian-config }
+          env:
+            - name: DB_NAME
+              value: "payment_service"
+            - name: SERVER_PORT
+              value: "8084"
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: meridian-secrets, key: POSTGRES_PASSWORD } }
+            - name: MERIDIAN_JWT_SECRET
+              valueFrom: { secretKeyRef: { name: meridian-secrets, key: MERIDIAN_JWT_SECRET } }
+            - name: ACCOUNT_SERVICE_BASE_URL
+              value: "http://account-service:8083"
+            - name: CUSTOMER_KYC_SERVICE_BASE_URL
+              value: "http://customer-kyc-service:8082"
+            - name: LEDGER_SERVICE_BASE_URL
+              value: "http://ledger-service:8085"
+            - name: FRAUD_RISK_SERVICE_BASE_URL
+              value: "http://fraud-risk-service:8086"
+          # startupProbe: see 20-auth-service.yaml for why this exists (CPU-starved cold boot on
+          # this 4-CPU node — real thundering-herd crash loop found during Phase 18 live testing).
+          startupProbe:
+            httpGet: { path: /actuator/health, port: 8084 }
+            periodSeconds: 10
+            failureThreshold: 90
+          readinessProbe:
+            httpGet: { path: /actuator/health, port: 8084 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /actuator/health, port: 8084 }
+            initialDelaySeconds: 5
+            periodSeconds: 15
+            failureThreshold: 12
+          resources:
+            requests: { cpu: "100m", memory: "384Mi" }
+            limits: { cpu: "750m", memory: "768Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: payment-service
+  namespace: meridian-bank
+spec:
+  selector: { app: payment-service }
+  ports:
+    - port: 8084
+      targetPort: 8084

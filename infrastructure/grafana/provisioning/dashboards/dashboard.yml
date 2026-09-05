@@ -1,0 +1,15 @@
+# Meridian Bank — Grafana dashboard provisioning (Phase 16).
+# Auto-loads every dashboard JSON in /var/lib/grafana/dashboards on container startup.
+
+apiVersion: 1
+
+providers:
+  - name: Meridian
+    orgId: 1
+    folder: Meridian Bank
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 30
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards

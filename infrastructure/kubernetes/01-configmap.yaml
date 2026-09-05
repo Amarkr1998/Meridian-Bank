@@ -1,0 +1,17 @@
+# Shared, non-secret values every service needs — the K8s equivalent of the values every service
+# block in docker-compose.yml repeats identically (DB host/port, Redis host/port, Kafka bootstrap).
+# Service DNS names below are chosen to exactly match docker-compose's service names
+# (postgres, redis, kafka, auth-service, ...) so every application image runs completely unmodified
+# in either environment — nothing here is Kubernetes-specific application code.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: meridian-config
+  namespace: meridian-bank
+data:
+  DB_HOST: "postgres"
+  DB_PORT: "5432"
+  DB_USER: "meridian"
+  REDIS_HOST: "redis"
+  REDIS_PORT: "6379"
+  KAFKA_BOOTSTRAP_SERVERS: "kafka:19092"

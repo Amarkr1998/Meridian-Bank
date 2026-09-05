@@ -1,0 +1,219 @@
+# Identical provisioning + dashboard content to infrastructure/grafana/ — again, no changes
+# needed since the Prometheus Service DNS name ("prometheus") matches docker-compose's.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-datasource
+  namespace: meridian-bank
+data:
+  datasource.yml: |
+    apiVersion: 1
+    datasources:
+      - name: Prometheus
+        type: prometheus
+        access: proxy
+        url: http://prometheus:9090
+        isDefault: true
+        editable: false
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboard-provider
+  namespace: meridian-bank
+data:
+  dashboard.yml: |
+    apiVersion: 1
+    providers:
+      - name: Meridian
+        orgId: 1
+        folder: Meridian Bank
+        type: file
+        disableDeletion: false
+        updateIntervalSeconds: 30
+        allowUiUpdates: true
+        options:
+          path: /var/lib/grafana/dashboards
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: grafana-dashboards
+  namespace: meridian-bank
+data:
+  meridian-overview.json: |
+    {
+      "title": "Meridian Bank — Service Overview",
+      "uid": "meridian-overview",
+      "timezone": "browser",
+      "schemaVersion": 39,
+      "version": 1,
+      "refresh": "15s",
+      "time": { "from": "now-30m", "to": "now" },
+      "tags": ["meridian"],
+      "panels": [
+        {
+          "id": 1,
+          "title": "Service Up/Down",
+          "type": "stat",
+          "datasource": "Prometheus",
+          "gridPos": { "h": 6, "w": 24, "x": 0, "y": 0 },
+          "targets": [
+            { "expr": "up{job=~\".+\"}", "legendFormat": "{{job}}", "refId": "A" }
+          ],
+          "fieldConfig": {
+            "defaults": {
+              "mappings": [
+                { "type": "value", "options": { "0": { "text": "DOWN", "color": "red" }, "1": { "text": "UP", "color": "green" } } }
+              ],
+              "thresholds": { "mode": "absolute", "steps": [{ "color": "red", "value": null }, { "color": "green", "value": 1 }] }
+            }
+          },
+          "options": { "colorMode": "background", "graphMode": "none", "textMode": "name_and_value" }
+        },
+        {
+          "id": 2,
+          "title": "HTTP Request Rate (per service)",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 6 },
+          "targets": [
+            { "expr": "sum by (application) (rate(http_server_requests_seconds_count[1m]))", "legendFormat": "{{application}}", "refId": "A" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "reqps" } }
+        },
+        {
+          "id": 3,
+          "title": "HTTP 5xx Error Rate (per service)",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 6 },
+          "targets": [
+            { "expr": "sum by (application) (rate(http_server_requests_seconds_count{status=~\"5..\"}[1m]))", "legendFormat": "{{application}}", "refId": "A" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "reqps" } }
+        },
+        {
+          "id": 4,
+          "title": "HTTP p95 Latency (per service)",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+          "targets": [
+            { "expr": "histogram_quantile(0.95, sum by (le, application) (rate(http_server_requests_seconds_bucket[5m])))", "legendFormat": "{{application}}", "refId": "A" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "s" } }
+        },
+        {
+          "id": 5,
+          "title": "JVM Heap Used (per service)",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+          "targets": [
+            { "expr": "sum by (application) (jvm_memory_used_bytes{area=\"heap\"})", "legendFormat": "{{application}}", "refId": "A" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "bytes" } }
+        },
+        {
+          "id": 6,
+          "title": "HikariCP Active Connections (per service)",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "gridPos": { "h": 8, "w": 12, "x": 0, "y": 22 },
+          "targets": [
+            { "expr": "sum by (application) (hikaricp_connections_active)", "legendFormat": "{{application}}", "refId": "A" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "short" } }
+        },
+        {
+          "id": 7,
+          "title": "JVM Threads Live (per service)",
+          "type": "timeseries",
+          "datasource": "Prometheus",
+          "gridPos": { "h": 8, "w": 12, "x": 12, "y": 22 },
+          "targets": [
+            { "expr": "sum by (application) (jvm_threads_live_threads)", "legendFormat": "{{application}}", "refId": "A" }
+          ],
+          "fieldConfig": { "defaults": { "unit": "short" } }
+        }
+      ]
+    }
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: grafana-data
+  namespace: meridian-bank
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: grafana
+  namespace: meridian-bank
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels: { app: grafana }
+  template:
+    metadata:
+      labels: { app: grafana }
+    spec:
+      containers:
+        - name: grafana
+          image: grafana/grafana:11.3.1
+          ports:
+            - containerPort: 3000
+          env:
+            - name: GF_SECURITY_ADMIN_USER
+              value: "admin"
+            - name: GF_SECURITY_ADMIN_PASSWORD
+              valueFrom: { secretKeyRef: { name: meridian-secrets, key: GRAFANA_ADMIN_PASSWORD } }
+            - name: GF_USERS_ALLOW_SIGN_UP
+              value: "false"
+          volumeMounts:
+            - name: datasource
+              mountPath: /etc/grafana/provisioning/datasources
+              readOnly: true
+            - name: dashboard-provider
+              mountPath: /etc/grafana/provisioning/dashboards
+              readOnly: true
+            - name: dashboards
+              mountPath: /var/lib/grafana/dashboards
+              readOnly: true
+            - name: data
+              mountPath: /var/lib/grafana
+          readinessProbe:
+            httpGet: { path: /api/health, port: 3000 }
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests: { cpu: "100m", memory: "192Mi" }
+            limits: { cpu: "500m", memory: "384Mi" }
+      volumes:
+        - name: datasource
+          configMap: { name: grafana-datasource }
+        - name: dashboard-provider
+          configMap: { name: grafana-dashboard-provider }
+        - name: dashboards
+          configMap: { name: grafana-dashboards }
+        - name: data
+          persistentVolumeClaim: { claimName: grafana-data }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: grafana
+  namespace: meridian-bank
+spec:
+  selector: { app: grafana }
+  ports:
+    - port: 3000
+      targetPort: 3000

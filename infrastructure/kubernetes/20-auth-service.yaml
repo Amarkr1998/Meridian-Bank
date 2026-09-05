@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: auth-service
+  namespace: meridian-bank
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: auth-service }
+  template:
+    metadata:
+      labels: { app: auth-service }
+    spec:
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:16-alpine
+          command: ["sh", "-c", "until pg_isready -h postgres -p 5432 -U meridian; do echo waiting for postgres; sleep 3; done"]
+      containers:
+        - name: auth-service
+          image: meridianbank-auth-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8081
+          envFrom:
+            - configMapRef: { name: meridian-config }
+          env:
+            - name: DB_NAME
+              value: "auth_service"
+            - name: SERVER_PORT
+              value: "8081"
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: meridian-secrets, key: POSTGRES_PASSWORD } }
+            - name: MERIDIAN_JWT_SECRET
+              valueFrom: { secretKeyRef: { name: meridian-secrets, key: MERIDIAN_JWT_SECRET } }
+            - name: MERIDIAN_ADMIN_EMAIL
+              value: "admin@meridianbank.local"
+            - name: MERIDIAN_ADMIN_PASSWORD
+              valueFrom: { secretKeyRef: { name: meridian-secrets, key: MERIDIAN_ADMIN_PASSWORD } }
+          # startupProbe: on this 4-CPU demo node, 10+ JVMs (9 services + Kafka) booting at once
+          # genuinely starve each other of CPU — real Spring context startup has been observed
+          # taking minutes, not seconds, under that contention. Without a startupProbe, liveness
+          # kills the container mid-boot using its own initialDelaySeconds, forever, on every node
+          # this constrained (a real thundering-herd crash loop discovered during Phase 18 live
+          # testing — see infrastructure/kubernetes/README.md, "Where this deliberately differs...").
+          # Liveness/readiness are disabled until this succeeds once, so their own delays below
+          # only need to cover normal steady-state checks, not cold boot under contention.
+          startupProbe:
+            httpGet: { path: /actuator/health, port: 8081 }
+            periodSeconds: 10
+            failureThreshold: 90
+          readinessProbe:
+            httpGet: { path: /actuator/health, port: 8081 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /actuator/health, port: 8081 }
+            initialDelaySeconds: 5
+            periodSeconds: 15
+            failureThreshold: 12
+          resources:
+            requests: { cpu: "100m", memory: "384Mi" }
+            limits: { cpu: "750m", memory: "768Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: auth-service
+  namespace: meridian-bank
+spec:
+  selector: { app: auth-service }
+  ports:
+    - port: 8081
+      targetPort: 8081

@@ -1,0 +1,63 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: audit-service
+  namespace: meridian-bank
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: audit-service }
+  template:
+    metadata:
+      labels: { app: audit-service }
+    spec:
+      initContainers:
+        - name: wait-for-postgres
+          image: postgres:16-alpine
+          command: ["sh", "-c", "until pg_isready -h postgres -p 5432 -U meridian; do echo waiting for postgres; sleep 3; done"]
+      containers:
+        - name: audit-service
+          image: meridianbank-audit-service:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8087
+          envFrom:
+            - configMapRef: { name: meridian-config }
+          env:
+            - name: DB_NAME
+              value: "audit_service"
+            - name: SERVER_PORT
+              value: "8087"
+            - name: DB_PASSWORD
+              valueFrom: { secretKeyRef: { name: meridian-secrets, key: POSTGRES_PASSWORD } }
+            - name: MERIDIAN_JWT_SECRET
+              valueFrom: { secretKeyRef: { name: meridian-secrets, key: MERIDIAN_JWT_SECRET } }
+          # startupProbe: see 20-auth-service.yaml for why this exists (CPU-starved cold boot on
+          # this 4-CPU node — real thundering-herd crash loop found during Phase 18 live testing).
+          startupProbe:
+            httpGet: { path: /actuator/health, port: 8087 }
+            periodSeconds: 10
+            failureThreshold: 90
+          readinessProbe:
+            httpGet: { path: /actuator/health, port: 8087 }
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: { path: /actuator/health, port: 8087 }
+            initialDelaySeconds: 5
+            periodSeconds: 15
+            failureThreshold: 12
+          resources:
+            requests: { cpu: "100m", memory: "384Mi" }
+            limits: { cpu: "750m", memory: "768Mi" }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: audit-service
+  namespace: meridian-bank
+spec:
+  selector: { app: audit-service }
+  ports:
+    - port: 8087
+      targetPort: 8087
