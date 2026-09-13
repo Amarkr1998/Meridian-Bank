@@ -119,11 +119,11 @@ state and an explicit stop.
 | 15 | React Operations & Compliance Portal *(done)* |
 | 16 | Observability + Prometheus + Grafana *(done)* |
 | 17 | Testing + Testcontainers + Security Testing *(done)* |
-| 18 | Docker + Kubernetes *(done — current)* |
-| 19 | CI/CD |
-| 20 | Final documentation + diagrams + demo data + interview prep |
+| 18 | Docker + Kubernetes *(done)* |
+| 19 | CI/CD *(done)* |
+| 20 | Final documentation + diagrams + demo data + interview prep *(done — current)* |
 
-**Status: Phase 0 through 18 complete.** Repository scaffolding, documentation, local infrastructure
+**Status: Phase 0 through 20 complete.** Repository scaffolding, documentation, local infrastructure
 (PostgreSQL, Kafka, Redis), `auth-service` (JWT, RBAC, MFA, lockout, password reset, session
 management), `customer-kyc-service` (registration, contact verification, profile, KYC review
 workflow), `account-service` (account opening request workflow gated on KYC, account lifecycle,
@@ -428,8 +428,10 @@ docker-compose stack and the full Kubernetes deployment simultaneously oversubsc
 4-CPU development machine, producing slow JVM boots and intermittent (self-recovering, not
 deadlocking) pod restarts in whichever stack has less headroom at a given moment — an inherent
 hardware constraint of this environment, not a manifest defect; verify one deployment target at a
-time for a clean run. Remaining phases (19 onward: CI/CD, final documentation) harden and deliver
-what already exists, not new product surface. Do not begin Phase 19 without explicit instruction.
+time for a clean run. Phase 19 added CI and delivery validation across backend, frontend, images,
+Compose, and Kubernetes, plus tagged delivery bundles. Phase 20 added the final documentation
+index, demo runbook, readiness check, synthetic personas, and interview guide. The fixed project
+plan is complete; future work belongs in a backlog rather than another numbered phase.
 
 ## Documentation Map
 
@@ -439,6 +441,9 @@ what already exists, not new product surface. Do not begin Phase 19 without expl
 - [docs/security](docs/security) — authN/authZ, data protection architecture
 - [docs/governance](docs/governance) — data classification, retention, masking, maker-checker
 - [docs/database](docs/database) — domain entities / ERD
+- [docs/delivery/ci-cd.md](docs/delivery/ci-cd.md) — CI gates, tagged delivery bundles, release boundary
+- [docs/demo](docs/demo) — demo runbook, synthetic personas, and interview preparation
+- [scripts](scripts) — repeatable local demo-readiness check
 - [docs/kafka](docs/kafka) — topic catalog & event contracts
 - [docs/reconciliation](docs/reconciliation) — reconciliation design
 - [docs/testing](docs/testing) — testing strategy across the whole system, Phase 17 findings

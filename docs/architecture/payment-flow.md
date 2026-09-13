@@ -3,23 +3,23 @@
 End-to-end account-to-account transfer, including validation order, idempotency, fraud/risk check,
 ledger posting, and event propagation.
 
-> **Implementation status (Phase 9):** `payment-service` implements the full validation pipeline
+> **Implementation status (Phase 20):** `payment-service` implements the full validation pipeline
 > (source account, beneficiary, KYC, currency, per-transaction/daily limits) and idempotency —
 > including a genuine concurrent-request race proven against real Redis — exactly as below. The
 > `RISK_CHECK` step now calls a real `fraud-risk-service` (see
 > [services/fraud-risk-service/README.md](../../services/fraud-risk-service/README.md)) and
 > genuinely enforces its decision: `BLOCK` fails with `failureCode: "FRAUD_BLOCKED"`, `REVIEW`
-> also fails, with `failureCode: "FRAUD_REVIEW_REQUIRED"` (a real system would hold a REVIEW
-> payment for the queue shown in fraud-flow.md rather than failing it — that hold/resume mechanism
-> is Phase 10's maker-checker infrastructure, which doesn't exist yet). The `PROCESSING` step
+> also fails, with `failureCode: "FRAUD_REVIEW_REQUIRED"`. A different staff member can approve a
+> maker-checker release that creates a new transaction; the original is not resumed. The
+> `PROCESSING` step
 > posts a real balanced debit/credit pair to `ledger-service` (pessimistic-locking,
 > fixed-lock-ordering concurrency control, proven against real Postgres under concurrent load —
 > see [services/ledger-service/README.md](../../services/ledger-service/README.md)), so a
 > `SUCCESS` result means real money genuinely moved; an insufficient real balance produces a
 > `FAILED` result with `failureCode: "INSUFFICIENT_BALANCE"`. Kafka events (Phase 8) are real for
 > `payment.initiated`/`payment.completed`/`payment.failed` — see
-> [docs/kafka/topics.md](../kafka/topics.md). Audit writes shown below are the target end-state
-> (Phase 11). See
+> [docs/kafka/topics.md](../kafka/topics.md). Audit and notification consumers shown below are
+> implemented. See
 > [services/payment-service/README.md](../../services/payment-service/README.md).
 
 ## Payment Lifecycle
@@ -81,8 +81,8 @@ sequenceDiagram
             PAY->>REDIS: Cache result under Idempotency-Key
             PAY-->>WEB: SUCCESS
         else decision = REVIEW
-            PAY->>PAY: Status = PROCESSING (held)
-            Note over PAY: Routed to maker-checker approval queue — see maker-checker-flow.md
+            PAY->>PAY: Status = FAILED (FRAUD_REVIEW_REQUIRED)
+            Note over PAY: Approved release creates a new transaction; the original is not resumed
         else decision = BLOCK
             PAY->>PAY: Status = FAILED
             PAY->>OUTBOX: Write payment.failed

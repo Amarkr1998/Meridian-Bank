@@ -3,12 +3,11 @@
 Covers registration through digital banking access. KYC review detail is expanded in
 [kyc-flow.md](kyc-flow.md).
 
-> **Implementation status (Phase 4):** registration through an active account is implemented and
-> verified end-to-end across `auth-service` + `customer-kyc-service` + `account-service` — see
-> [services/account-service/README.md](../../services/account-service/README.md). Balance and
-> transaction history are explicitly not part of this (they need `ledger-service`/
-> `payment-service`, Phases 6–7). Kafka events, audit writes, and notifications shown below are
-> the target end-state (Phases 8, 11, 13).
+> **Implementation status (Phase 20):** this flow is implemented end-to-end. Registration,
+> contact verification, KYC review, account opening, ledger-backed balances, payments, Kafka
+> events, audit records, and notifications all have real service implementations. The risk-summary
+> lookup shown during KYC review remains an honest limitation: the endpoint exists, but the portal
+> does not surface it. See [demo-runbook.md](../demo/demo-runbook.md).
 
 ## State Flow
 

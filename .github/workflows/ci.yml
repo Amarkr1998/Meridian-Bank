@@ -1,16 +1,13 @@
-name: CI
+name: CI and delivery validation
 
-# Continuous Integration only. There is deliberately no continuous-deployment job here: this
-# project has no real cloud/staging target to deploy to (see CLAUDE.md — "everything must run
-# locally without paid cloud services"), so "CD" for a project like this means proving every
-# service is genuinely buildable and deployable, not shipping it somewhere. The `docker-build`
-# job below is that proof — it builds every service's real multi-stage Dockerfile (the same one
-# `docker compose build` and the Kubernetes manifests both use) on every push, with no registry
-# push, so a broken Dockerfile is caught here rather than at the next `docker compose up --build`.
+# CI validates source, tests, container images, Compose, and Kubernetes. Version tags additionally
+# produce a traceable local-deployment bundle. There is deliberately no push to a registry or
+# unattended environment deployment because this project has no remote deployment target.
 
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -86,6 +83,10 @@ jobs:
         working-directory: frontend
         run: npm run build
 
+      - name: Lint
+        working-directory: frontend
+        run: npm run lint
+
       - name: Unit tests
         working-directory: frontend
         run: npm test
@@ -123,3 +124,48 @@ jobs:
         run: |
           cp .env.example .env
           docker compose config -q
+
+  kubernetes-config:
+    name: kubernetes manifest validation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: latest
+
+      - name: Validate client-side Kubernetes manifests
+        run: kubectl apply --dry-run=client --validate=false -f infrastructure/kubernetes/
+
+  delivery-bundle:
+    name: tagged delivery bundle
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [backend, frontend, docker-build, compose-config, kubernetes-config]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build traceable local-deployment bundle
+        shell: bash
+        run: |
+          version="${GITHUB_REF_NAME}"
+          mkdir -p delivery
+          git ls-files -z | tar --null -czf "delivery/meridian-bank-${version}.tar.gz" --files-from=-
+          {
+            echo "version=${version}"
+            echo "commit=${GITHUB_SHA}"
+            echo "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+            echo "deployment_targets=docker-compose,kubernetes"
+          } > delivery/manifest.txt
+
+      - name: Upload delivery bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: meridian-bank-${{ github.ref_name }}
+          path: delivery/
+          if-no-files-found: error
+          retention-days: 30

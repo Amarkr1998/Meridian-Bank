@@ -150,7 +150,7 @@ plan and the working rules that govern how each phase is implemented. Each phase
 and documented before moving to the next; business functionality is never scaffolded ahead of the
 phase that owns it.
 
-**Current status: Phase 18 — Docker + Kubernetes.** The full chain — registration → KYC verification
+**Current status: Phase 20 — complete.** The full chain — registration → KYC verification
 → account opening → beneficiary add/verify → a real account-to-account payment that genuinely
 moves money via a real double-entry ledger, idempotent and concurrency-safe by design — works
 end-to-end across `auth-service`, `customer-kyc-service`, `account-service`, `payment-service`, and
@@ -306,6 +306,16 @@ One inherent limitation, not a manifest bug: running the full docker-compose sta
 Kubernetes deployment simultaneously on one small machine oversubscribes it; verify one deployment
 target at a time.
 
+As of Phase 19, GitHub Actions validates every backend, the frontend, every Docker image, the
+Compose topology, and all Kubernetes manifests. Version tags additionally produce a traceable
+local-delivery bundle; no registry or remote environment is implied. See
+[docs/delivery/ci-cd.md](docs/delivery/ci-cd.md).
+
+As of Phase 20, the fixed roadmap is complete. The final handoff includes a guided demo runbook,
+safe synthetic personas, a repeatable readiness check, and an interview guide. See
+[demo runbook](docs/demo/demo-runbook.md), [interview guide](docs/demo/interview-guide.md), and
+[scripts](scripts).
+
 ---
 
 ## Getting Started
@@ -451,4 +461,8 @@ Meridian Bank is a fictional demo bank. This project:
 - [Database](docs/database) — domain model / ERD
 - [Kafka](docs/kafka) — topic catalog & event contracts
 - [Reconciliation](docs/reconciliation) — reconciliation design
+- [CI/CD and Delivery](docs/delivery/ci-cd.md) — validation gates and tagged bundles
+- [Demo Runbook](docs/demo/demo-runbook.md) — final walkthrough and synthetic personas
+- [Interview Guide](docs/demo/interview-guide.md) — architecture rationale and talking points
+- [Scripts](scripts) — repeatable local demo readiness check
 - [ADRs](docs/adr) — architecture decision records

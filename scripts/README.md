@@ -1,15 +1,19 @@
 # scripts
 
-**Status:** Empty (scaffolding only — see [CLAUDE.md](../CLAUDE.md) phase plan).
+**Status:** Implemented for the final demo/readiness scope (Phase 20).
 
-## Planned Contents
+## Available scripts
 
-Local development and demo utility scripts, added as the phases that need them land:
+`Test-DemoReadiness.ps1` checks the frontend, API gateway, Prometheus, and Grafana endpoints and
+exits with an error when the local demo stack is not ready.
 
-- Environment bootstrap (Docker Compose up/down helpers)
-- Synthetic demo data seeding (Phase 20, referencing generators introduced per domain phase)
-- Local Kafka topic creation
-- Database migration helpers
-- Kubernetes local deployment helpers (Minikube/Kind)
+Run it from the repository root after `docker compose up -d --build`:
 
-No scripts exist yet; this directory is reserved.
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File ./scripts/Test-DemoReadiness.ps1
+```
+
+The Kafka and database bootstrap scripts remain beside the infrastructure they own. The guided
+scenario and safe synthetic personas are in `docs/demo/demo-runbook.md`. Demo state is created
+through the public APIs using `demo-data/personas.json` instead of opaque database fixtures, so the
+real controls remain visible.

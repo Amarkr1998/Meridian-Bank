@@ -1,15 +1,15 @@
 # Fraud Detection Flow
 
-> **Implementation status (Phase 9):** `POST /api/v1/risk-assessments` on `fraud-risk-service`,
+> **Implementation status (Phase 20):** `POST /api/v1/risk-assessments` on `fraud-risk-service`,
 > the weighted rule engine, the LOW/MEDIUM/HIGH scoring bands, and `payment-service` genuinely
 > enforcing the ALLOW/REVIEW/BLOCK decision are all real and implemented exactly as below — proven
 > against a real Postgres and the live docker-compose stack; see
 > [services/fraud-risk-service/README.md](../../services/fraud-risk-service/README.md). What's
-> still a placeholder: a REVIEW decision fails the payment outright
+> A REVIEW decision still fails the original payment
 > (`failureCode: "FRAUD_REVIEW_REQUIRED"`) rather than holding it for the Ops Portal review queue
-> shown below — that hold/resume workflow belongs to Phase 10's maker-checker infrastructure,
-> which doesn't exist yet. `audit-service` writes are the target end-state (Phase 11) — a fraud
-> alert's audit trail today is just its own row history in `fraud_alerts`.
+> shown below. Phase 10 added a maker-checker release path that creates a new transaction after a
+> different staff member approves it; it is not a true hold/resume mechanism. Audit events and the
+> Operations Portal queue are implemented.
 
 ## Risk Scoring
 

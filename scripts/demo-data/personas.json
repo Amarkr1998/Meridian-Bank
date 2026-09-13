@@ -1,0 +1,51 @@
+{
+  "notice": "Synthetic local-demo data only. Never replace these values with real identity or banking data.",
+  "sharedDemoPassword": "DemoOnly!Pass1",
+  "staff": [
+    { "email": "ops.one@meridianbank.test", "role": "OPERATIONS" },
+    { "email": "ops.two@meridianbank.test", "role": "OPERATIONS" },
+    { "email": "compliance@meridianbank.test", "role": "COMPLIANCE_OFFICER" },
+    { "email": "risk@meridianbank.test", "role": "RISK_ANALYST" },
+    { "email": "auditor@meridianbank.test", "role": "AUDITOR" }
+  ],
+  "customers": [
+    {
+      "email": "maya.chen@example.test",
+      "firstName": "Maya",
+      "lastName": "Chen",
+      "dateOfBirth": "1992-04-18",
+      "phone": "+1-555-0101",
+      "addressLine1": "101 Demo Avenue",
+      "city": "Example City",
+      "state": "CA",
+      "postalCode": "00001",
+      "country": "USA",
+      "kyc": {
+        "nationality": "USA",
+        "occupation": "Product Designer",
+        "documents": [
+          { "documentType": "PASSPORT", "documentReference": "SYNTHETIC-MAYA-001" }
+        ]
+      }
+    },
+    {
+      "email": "noah.williams@example.test",
+      "firstName": "Noah",
+      "lastName": "Williams",
+      "dateOfBirth": "1988-11-07",
+      "phone": "+1-555-0102",
+      "addressLine1": "202 Sample Street",
+      "city": "Example City",
+      "state": "NY",
+      "postalCode": "00002",
+      "country": "USA",
+      "kyc": {
+        "nationality": "USA",
+        "occupation": "Software Engineer",
+        "documents": [
+          { "documentType": "DRIVERS_LICENSE", "documentReference": "SYNTHETIC-NOAH-001" }
+        ]
+      }
+    }
+  ]
+}
