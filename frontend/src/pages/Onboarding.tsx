@@ -23,7 +23,13 @@ import { PageHeader } from '../components/PageHeader';
 import { LoadingBlock, ErrorBlock } from '../components/Feedback';
 import { StatusChip } from '../components/StatusChip';
 import { useAuth } from '../auth/AuthContext';
-import { useKycHistory, useSubmitKyc } from '../api/customers';
+import {
+  resendVerification,
+  useCustomer,
+  useKycHistory,
+  useSubmitKyc,
+  verifyContact,
+} from '../api/customers';
 import { ApiError } from '../api/client';
 import type { DocumentType } from '../types/domain';
 
@@ -46,9 +52,15 @@ type FormValues = z.infer<typeof schema>;
 
 export function Onboarding() {
   const { user } = useAuth();
+  const { data: customer, refetch: refetchCustomer } = useCustomer(user?.userId);
   const { data: history, isLoading, error } = useKycHistory(user?.userId);
   const submitKyc = useSubmitKyc(user?.userId);
   const [serverError, setServerError] = useState<string | null>(null);
+  const [contactOtp, setContactOtp] = useState('');
+  const [devOtp, setDevOtp] = useState<string | undefined>();
+  const [contactError, setContactError] = useState<string | null>(null);
+  const [resending, setResending] = useState(false);
+  const [verifyingContact, setVerifyingContact] = useState(false);
 
   const {
     register,
@@ -73,12 +85,80 @@ export function Onboarding() {
     }
   }
 
+  async function onResendVerification() {
+    if (!user?.userId) return;
+    setContactError(null);
+    setResending(true);
+    try {
+      const result = await resendVerification(user.userId);
+      setDevOtp(result.devOtp);
+    } catch (err) {
+      setContactError(err instanceof ApiError ? err.message : 'Unable to send a verification code.');
+    } finally {
+      setResending(false);
+    }
+  }
+
+  async function onVerifyContact() {
+    if (!user?.userId) return;
+    setContactError(null);
+    setVerifyingContact(true);
+    try {
+      await verifyContact(user.userId, contactOtp);
+      setContactOtp('');
+      setDevOtp(undefined);
+      await refetchCustomer();
+    } catch (err) {
+      setContactError(err instanceof ApiError ? err.message : 'Invalid or expired verification code.');
+    } finally {
+      setVerifyingContact(false);
+    }
+  }
+
   return (
     <AppLayout>
       <PageHeader title="Identity verification (KYC)" subtitle="Required once before you can open an account." />
 
       {isLoading && <LoadingBlock />}
       {error && <ErrorBlock error={error} />}
+
+      {customer && !customer.contactVerified && (
+        <Card sx={{ mb: 3 }}>
+          <CardContent>
+            <Typography variant="subtitle1" fontWeight={600} gutterBottom>
+              Verify your contact details first
+            </Typography>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+              KYC submission is available after your registration contact code is verified.
+            </Typography>
+            {contactError && <Alert severity="error" sx={{ mb: 2 }}>{contactError}</Alert>}
+            {devOtp && (
+              <Alert severity="info" sx={{ mb: 2 }}>
+                Demo mode — verification code: <strong>{devOtp}</strong>
+              </Alert>
+            )}
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+              <Button variant="outlined" onClick={onResendVerification} disabled={resending}>
+                {resending ? 'Sending…' : 'Send verification code'}
+              </Button>
+              <TextField
+                label="Verification code"
+                value={contactOtp}
+                onChange={(event) => setContactOtp(event.target.value)}
+                inputProps={{ maxLength: 6, inputMode: 'numeric' }}
+                size="small"
+              />
+              <Button
+                variant="contained"
+                onClick={onVerifyContact}
+                disabled={verifyingContact || contactOtp.length !== 6}
+              >
+                {verifyingContact ? 'Verifying…' : 'Verify'}
+              </Button>
+            </Stack>
+          </CardContent>
+        </Card>
+      )}
 
       {latest && (
         <Card sx={{ mb: 3 }}>
@@ -113,7 +193,7 @@ export function Onboarding() {
         </Card>
       )}
 
-      {canSubmit && (
+      {customer?.contactVerified && canSubmit && (
         <Card>
           <CardContent>
             <Box component="form" onSubmit={handleSubmit(onSubmit)} noValidate>

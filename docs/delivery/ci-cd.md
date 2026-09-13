@@ -17,7 +17,7 @@ tags matching `v*`.
 | Frontend | Clean install, TypeScript production build, lint, and Vitest suite |
 | Container matrix | Every service's real multi-stage Dockerfile builds |
 | Compose validation | The complete local topology resolves with `.env.example` |
-| Kubernetes validation | Every plain manifest passes client-side `kubectl` validation |
+| Kubernetes validation | Every plain manifest passes strict offline Kubernetes schema validation |
 | Tagged delivery | A `v*` tag produces a commit-addressed source/deployment bundle and manifest |
 
 Backend test reports are retained on failure. A tagged build is uploaded as a GitHub Actions
@@ -39,4 +39,3 @@ The workflow does not publish images, alter a cluster, or require repository sec
 actual deployment job requires an explicitly chosen registry and environment, environment-scoped
 credentials, protected approvals, rollback policy, and ownership. Until those exist, automated
 deployment would be misleading and unsafe.
-

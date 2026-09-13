@@ -21,7 +21,7 @@ export async function verifyContact(customerId: string, otp: string): Promise<vo
   await apiClient.post(`/api/v1/customers/${customerId}/verify-contact`, { otp });
 }
 
-export async function resendVerification(customerId: string): Promise<{ verificationExpiresInSeconds: number; devOtp?: string }> {
+export async function resendVerification(customerId: string): Promise<{ expiresInSeconds: number; devOtp?: string }> {
   const { data } = await apiClient.post(`/api/v1/customers/${customerId}/resend-verification`);
   return data;
 }

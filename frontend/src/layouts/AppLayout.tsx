@@ -28,6 +28,7 @@ import SupportAgentIcon from '@mui/icons-material/SupportAgent';
 import NotificationsIcon from '@mui/icons-material/Notifications';
 import PersonIcon from '@mui/icons-material/Person';
 import ShieldIcon from '@mui/icons-material/Shield';
+import FactCheckIcon from '@mui/icons-material/FactCheck';
 import LogoutIcon from '@mui/icons-material/Logout';
 import { Link as RouterLink, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '../auth/AuthContext';
@@ -37,6 +38,7 @@ const DRAWER_WIDTH = 248;
 
 const NAV_ITEMS = [
   { label: 'Dashboard', path: '/dashboard', icon: <DashboardIcon /> },
+  { label: 'Identity verification', path: '/onboarding', icon: <FactCheckIcon /> },
   { label: 'Accounts', path: '/accounts', icon: <CreditCardIcon /> },
   { label: 'Beneficiaries', path: '/beneficiaries', icon: <GroupIcon /> },
   { label: 'Payments', path: '/payments', icon: <SendIcon /> },

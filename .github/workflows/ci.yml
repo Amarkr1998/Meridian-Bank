@@ -131,13 +131,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up kubectl
-        uses: azure/setup-kubectl@v4
+      # kubectl client-side dry runs still perform API discovery and fail when CI has no cluster.
+      # kubeconform validates the rendered resources against Kubernetes schemas entirely offline.
+      - name: Validate Kubernetes manifests offline
+        uses: docker://ghcr.io/yannh/kubeconform:v0.7.0
         with:
-          version: latest
-
-      - name: Validate client-side Kubernetes manifests
-        run: kubectl apply --dry-run=client --validate=false -f infrastructure/kubernetes/
+          args: -strict -summary infrastructure/kubernetes
 
   delivery-bundle:
     name: tagged delivery bundle
